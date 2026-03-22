@@ -1,7 +1,7 @@
 FROM node:20-bullseye AS frontend_builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --force --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
