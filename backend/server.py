@@ -401,6 +401,9 @@ async def _google_find_or_create_user_async(email: str, name: str, picture: str)
     if existing:
         # Update with Google info
         update = {"last_online": datetime.now(timezone.utc).isoformat(), "is_online": True}
+        if not existing.get("id"):
+            # Backward compatibility for legacy users created before "id" was required.
+            update["id"] = str(uuid.uuid4())
         if picture and not existing.get("avatar_url"):
             update["avatar_url"] = picture
         if not existing.get("username") or existing["username"] == "Google User":
@@ -440,6 +443,9 @@ async def _facebook_find_or_create_user_async(email: str, name: str, picture: st
     existing = await db.users.find_one({"email": email})
     if existing:
         update = {"last_online": datetime.now(timezone.utc).isoformat(), "is_online": True}
+        if not existing.get("id"):
+            # Backward compatibility for legacy users created before "id" was required.
+            update["id"] = str(uuid.uuid4())
         if picture and not existing.get("avatar_url"):
             update["avatar_url"] = picture
         if not existing.get("username") or existing["username"] == "Facebook User":
