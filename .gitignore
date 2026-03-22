@@ -1,3 +1,8 @@
 node_modules
 build
 .xamox-logs
+.xamox-tools
+*.zip
+backend/.env
+frontend/.env.local
+frontend/.env.local.tmp

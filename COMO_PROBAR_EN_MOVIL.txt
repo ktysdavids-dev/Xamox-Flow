@@ -1,0 +1,22 @@
+═══════════════════════════════════════════════════════════
+  Xamox Flow — probar en el móvil (una sola cosa que hacer)
+═══════════════════════════════════════════════════════════
+
+1. En el Mac, doble clic en:  JUGAR_MOVIL.command
+
+2. Espera a que termine de compilar y salga una línea como:
+      http://192.168.x.x:8000
+
+3. En el móvil (misma WiFi), abre ESA dirección en Safari o Chrome.
+
+IMPORTANTE: NO uses la dirección con :3000 en el móvil. Esa es solo para
+JUGAR_AHORA en el Mac. En el teléfono tiene que ser :8000 y el script
+JUGAR_MOVIL.command (el script copia la URL al portapapeles del Mac).
+
+No hace falta instalar nada en el móvil. Si algo falla, el Mac debe tener
+Mongo (o Docker) para la base de datos.
+
+La app en el móvil ahora llama a la API con la ruta "/api" del mismo sitio
+donde cargaste la página, para evitar fallos raros del navegador con la IP.
+
+═══════════════════════════════════════════════════════════

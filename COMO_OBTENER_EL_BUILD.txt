@@ -1,0 +1,25 @@
+CÓMO OBTENER LA CARPETA BUILD (sin usar la terminal)
+====================================================
+
+La carpeta "build" NO existe hasta que se genera. Para generarla y tener un archivo para descargar/usar:
+
+1. Abre la carpeta:   xamox-flow-source
+
+2. Haz DOBLE CLIC en:   CREAR_BUILD_Y_ZIP.command
+
+   (Si macOS dice "no se puede abrir porque es de un desarrollador no identificado":
+    - Clic derecho en el archivo → Abrir → Abrir otra vez.)
+
+3. Se abrirá una ventana de Terminal y se ejecutarán los pasos. Espera hasta que diga "Done!" y "Press Enter to close."
+
+4. En el ESCRITORIO aparecerá un archivo:   XamoxFlow-build.zip
+
+   Ese ZIP es tu build listo. Puedes:
+   - Descomprimirlo y subir la carpeta resultante a tu servidor web, o
+   - Usarlo para Google Play / PWA según tu guía.
+
+Dónde está la carpeta build (si la quieres sin zip):
+   xamox-flow-source → frontend → build
+   (Solo existe después de haber ejecutado el script o "npm run build".)
+
+No hay un "enlace de descarga" en internet: el build se crea en tu Mac con el script anterior.

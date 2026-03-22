@@ -1,0 +1,46 @@
+═══════════════════════════════════════════════════════════════
+  Cómo tener un ENLACE para abrir el juego desde Telegram
+═══════════════════════════════════════════════════════════════
+
+Yo (la IA) NO puedo enviarte un mensaje a Telegram. Tú copias el enlace
+y te lo mandas a ti mismo en Telegram (Mensajes guardados).
+
+───────────────────────────────────────────────────────────────
+  OPCIÓN A — Misma WiFi (móvil y Mac en la misma red, sin internet público)
+───────────────────────────────────────────────────────────────
+
+1) En el Mac: doble clic en  JUGAR_MOVIL.command
+   (espera a que termine el build y diga que el servidor está listo)
+
+2) En la ventana negra verás una línea como:
+      http://10.16.88.66:8000
+   (los números pueden ser distintos)
+
+3) Selecciona esa URL con el ratón y cópiala (Cmd+C).
+
+4) En el MÓVIL abre Telegram → busca "Mensajes guardados" (Saved Messages)
+   → pega el enlace → envía → pulsa el enlace.
+
+   IMPORTANTE: el iPhone debe estar en la MISMA WiFi que el Mac.
+   No sirve con datos móviles.
+
+───────────────────────────────────────────────────────────────
+  OPCIÓN B — Enlace que funciona aunque NO estés en la misma WiFi
+  (túnel público; hace falta cuenta gratis en ngrok o similar)
+───────────────────────────────────────────────────────────────
+
+1) Instala ngrok: https://ngrok.com/download  (y configura tu token)
+
+2) Arranca el juego en el Mac: JUGAR_MOVIL.command (puerto 8000)
+
+3) En Terminal:
+      ngrok http 8000
+
+4) Ngrok te mostrará un enlace https://xxxx.ngrok-free.app
+   ESE enlace es el que copias y te envías por Telegram.
+   Funciona desde datos móviles u otra red.
+
+═══════════════════════════════════════════════════════════════
+
+Resumen: no hay magia "un link universal" sin desplegar el juego o
+sin un túnel (ngrok). Lo más simple en casa = Opción A.

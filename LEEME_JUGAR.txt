@@ -1,0 +1,14 @@
+═══════════════════════════════════════════════════════════════
+  Cómo jugar (simple)
+═══════════════════════════════════════════════════════════════
+
+  Doble clic:  JUGAR_AHORA.command
+
+  Espera el "npm run build" (puede tardar). Al final se abre el juego en:
+      http://127.0.0.1:8000/
+
+  NO uses localhost:3000 — ya no hace falta.
+
+  Para parar: en la ventana negra, Ctrl+C
+
+═══════════════════════════════════════════════════════════════

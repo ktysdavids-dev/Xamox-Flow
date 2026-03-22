@@ -1,0 +1,26 @@
+═══════════════════════════════════════════════════════════════
+  Si el juego no carga en el móvil — 3 comprobaciones (en orden)
+═══════════════════════════════════════════════════════════════
+
+1) Solo JUGAR_MOVIL.command (cierra JUGAR_AHORA antes).
+   En el móvil, misma WiFi que el Mac.
+
+2) Abre en el navegador del móvil (Safari o Chrome):
+
+      http://TU_IP:8000/_xamox_ok.html
+
+   (Sustituye TU_IP por el número que muestra Terminal, ej. 10.16.88.66)
+
+   • Si NO ves la página verde “Servidor Xamox OK”
+     → no es culpa del juego: red distinta, firewall del Mac, o datos
+       móviles en lugar de WiFi. Revisa Ajustes → WiFi en el iPhone.
+
+   • Si SÍ ves esa página
+     → el servidor llega bien. Entonces abre http://TU_IP:8000/ para el juego.
+       Si / falla: recarga forzada, ventana privada, o borrar datos del sitio.
+
+3) Opcional JSON (debe verse {"ok":true,...}):
+
+      http://TU_IP:8000/_xamox_ping
+
+═══════════════════════════════════════════════════════════════

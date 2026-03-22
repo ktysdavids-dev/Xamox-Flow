@@ -1,0 +1,18 @@
+If "PROBAR JUEGO" still fails:
+
+1) Open this file in the project folder after running the script:
+   .xamox-logs/probar-juego-ultimo.log
+   The LAST lines usually say the real error (build, Python, port).
+
+2) Run from Terminal (not double-click) so the window never closes alone:
+   cd ~/Desktop/xamox-backup-2026-03-19
+   bash PROBAR_JUEGO_MAC.command
+
+3) In the browser, try first:
+   http://127.0.0.1:8000/_xamox_ok.html
+   If that page does not load, the server is not running.
+
+4) Kill anything on port 8000:
+   lsof -nP -iTCP:8000 -sTCP:LISTEN
+
+Si sigue fallando, copia las últimas 40 líneas de probar-juego-ultimo.log y pégalas en el chat.

@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.ktysdavids.xamoxflow",
+    "sha256_cert_fingerprints": ["94:66:2A:6E:C3:3E:5B:39:02:45:35:29:10:BF:14:74:12:C6:1E:DA:61:A9:0B:EA:B5:A7:58:3D:99:84:86:AD"]
+  }
+}]
