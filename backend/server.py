@@ -555,49 +555,55 @@ async def google_oauth_start(request: Request, redirect_uri: str = ""):
 @api_router.get("/auth/google/callback")
 async def google_oauth_callback(request: Request, code: str = "", state: str = ""):
     """Exchange code for user info and redirect to frontend with token."""
-    if not code or not state:
-        raise HTTPException(status_code=400, detail="Missing code or state")
     try:
-        redirect_uri = base64.urlsafe_b64decode(state.encode()).decode()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid state")
-    callback_base = _oauth_public_base(request)
-    callback_url = f"{callback_base}/api/auth/google/callback"
-    import requests as req_lib
-    resp = req_lib.post(
-        "https://oauth2.googleapis.com/token",
-        data={
-            "code": code,
-            "client_id": GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
-            "redirect_uri": callback_url,
-            "grant_type": "authorization_code",
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=10,
-    )
-    if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Google token exchange failed")
-    data = resp.json()
-    id_token = data.get("id_token") or data.get("access_token")
-    if not id_token:
-        raise HTTPException(status_code=401, detail="No token from Google")
-    info_resp = req_lib.get(
-        f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}",
-        timeout=5,
-    )
-    if info_resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid Google token")
-    info = info_resp.json()
-    if info.get("aud") != GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=401, detail="Token audience mismatch")
-    email = info.get("email", "")
-    name = info.get("name", "Google User")
-    picture = info.get("picture", "")
-    result = await _google_find_or_create_user_async(email, name, picture)
-    token = result["token"]
-    sep = "&" if "?" in redirect_uri else "?"
-    return RedirectResponse(url=f"{redirect_uri}{sep}token={token}")
+        if not code or not state:
+            raise HTTPException(status_code=400, detail="Missing code or state")
+        try:
+            redirect_uri = base64.urlsafe_b64decode(state.encode()).decode()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid state")
+        callback_base = _oauth_public_base(request)
+        callback_url = f"{callback_base}/api/auth/google/callback"
+        import requests as req_lib
+        resp = req_lib.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri": callback_url,
+                "grant_type": "authorization_code",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=401, detail="Google token exchange failed")
+        data = resp.json()
+        id_token = data.get("id_token") or data.get("access_token")
+        if not id_token:
+            raise HTTPException(status_code=401, detail="No token from Google")
+        info_resp = req_lib.get(
+            f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}",
+            timeout=5,
+        )
+        if info_resp.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid Google token")
+        info = info_resp.json()
+        if info.get("aud") != GOOGLE_CLIENT_ID:
+            raise HTTPException(status_code=401, detail="Token audience mismatch")
+        email = info.get("email", "")
+        name = info.get("name", "Google User")
+        picture = info.get("picture", "")
+        result = await _google_find_or_create_user_async(email, name, picture)
+        token = result["token"]
+        sep = "&" if "?" in redirect_uri else "?"
+        return RedirectResponse(url=f"{redirect_uri}{sep}token={token}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Unhandled error in Google OAuth callback")
+        raise HTTPException(status_code=500, detail=f"google_callback_internal:{type(e).__name__}")
 
 
 @api_router.get("/auth/facebook")
@@ -687,6 +693,17 @@ async def get_auth_providers():
             "facebook": {"enabled": facebook_enabled, "status": "ready" if facebook_enabled else "coming_soon"},
         }
     }
+
+
+@api_router.get("/diag/db")
+async def diag_db():
+    """Temporary diagnostics endpoint to validate Mongo connectivity in production."""
+    try:
+        ping = await db.command("ping")
+        return {"ok": True, "mongo": ping}
+    except Exception as e:
+        logger.exception("MongoDB diagnostics failed")
+        return {"ok": False, "error_type": type(e).__name__, "error": str(e)}
 
 
 # ==================== MUSIC GENRES ====================
