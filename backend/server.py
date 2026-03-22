@@ -408,7 +408,13 @@ async def _google_find_or_create_user_async(email: str, name: str, picture: str)
             update["avatar_url"] = picture
         if not existing.get("username") or existing["username"] == "Google User":
             update["username"] = name
-        connected = set(existing.get("connected_providers", []))
+        raw_connected = existing.get("connected_providers", [])
+        if isinstance(raw_connected, list):
+            connected = set([p for p in raw_connected if isinstance(p, str) and p.strip()])
+        elif isinstance(raw_connected, str) and raw_connected.strip():
+            connected = {raw_connected.strip()}
+        else:
+            connected = set()
         connected.add("google")
         update["connected_providers"] = list(connected)
         if not existing.get("auth_provider"):
@@ -434,7 +440,12 @@ async def _google_find_or_create_user_async(email: str, name: str, picture: str)
         }
         await db.users.insert_one(user_doc)
     
-    token = create_token({"user_id": user_doc["id"], "email": email})
+    user_id = user_doc.get("id")
+    if not user_id:
+        # Last-resort guard to prevent OAuth callback 500 on legacy docs.
+        user_id = str(uuid.uuid4())
+        await db.users.update_one({"email": email}, {"$set": {"id": user_id}})
+    token = create_token({"user_id": user_id, "email": email})
     safe_user = {k: v for k, v in user_doc.items() if k not in ["password_hash", "_id"]}
     return {"token": token, "user": serialize_doc(safe_user)}
 
@@ -450,7 +461,13 @@ async def _facebook_find_or_create_user_async(email: str, name: str, picture: st
             update["avatar_url"] = picture
         if not existing.get("username") or existing["username"] == "Facebook User":
             update["username"] = name
-        connected = set(existing.get("connected_providers", []))
+        raw_connected = existing.get("connected_providers", [])
+        if isinstance(raw_connected, list):
+            connected = set([p for p in raw_connected if isinstance(p, str) and p.strip()])
+        elif isinstance(raw_connected, str) and raw_connected.strip():
+            connected = {raw_connected.strip()}
+        else:
+            connected = set()
         connected.add("facebook")
         update["connected_providers"] = list(connected)
         if not existing.get("auth_provider"):
@@ -476,7 +493,12 @@ async def _facebook_find_or_create_user_async(email: str, name: str, picture: st
         }
         await db.users.insert_one(user_doc)
 
-    token = create_token({"user_id": user_doc["id"], "email": email})
+    user_id = user_doc.get("id")
+    if not user_id:
+        # Last-resort guard to prevent OAuth callback 500 on legacy docs.
+        user_id = str(uuid.uuid4())
+        await db.users.update_one({"email": email}, {"$set": {"id": user_id}})
+    token = create_token({"user_id": user_id, "email": email})
     safe_user = {k: v for k, v in user_doc.items() if k not in ["password_hash", "_id"]}
     return {"token": token, "user": serialize_doc(safe_user)}
 
