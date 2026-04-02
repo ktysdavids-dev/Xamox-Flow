@@ -61,6 +61,10 @@ export const API =
     ? '/api'
     : `${String(_originAbs).replace(/\/$/, '')}/api`;
 
+export const MARKETING_URL = (process.env.REACT_APP_MARKETING_URL || 'https://www.xamoxflow.com').replace(/\/$/, '');
+export const PLAY_STORE_URL =
+  (process.env.REACT_APP_PLAY_STORE_URL || 'https://play.google.com/store/apps/details?id=com.xamoxflow.app').trim();
+
 /** Origen HTTP del backend (para OAuth y enlaces absolutos). */
 export function getBackendHttpOrigin() {
   if (typeof window === 'undefined') {

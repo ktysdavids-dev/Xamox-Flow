@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 import hashlib
+import stripe
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -35,6 +36,16 @@ db = client[os.environ.get('DB_NAME', 'xamox_flow')]
 SECRET_KEY = os.environ.get('JWT_SECRET', 'xamox-flow-secret-key-2024-premium')
 ALGORITHM = "HS256"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Stripe / monetization
+STRIPE_SECRET_KEY = (os.environ.get("STRIPE_SECRET_KEY") or "").strip()
+STRIPE_WEBHOOK_SECRET = (os.environ.get("STRIPE_WEBHOOK_SECRET") or "").strip()
+STRIPE_PRICE_ID = (os.environ.get("STRIPE_PRICE_ID") or "").strip()
+STRIPE_PROMO_AMOUNT_EUR_CENTS = int((os.environ.get("STRIPE_PROMO_AMOUNT_EUR_CENTS") or "299").strip() or "299")
+MARKETING_SITE_URL = (os.environ.get("MARKETING_SITE_URL") or "https://www.xamoxflow.com").rstrip("/")
+
+if STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
 
 app = FastAPI()
 
@@ -327,6 +338,60 @@ def verify_token(token: str):
 def generate_room_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
+def normalize_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+async def activate_license_for_email(email: str, source: str = "stripe_web", extra: Optional[Dict[str, Any]] = None):
+    email_norm = normalize_email(email)
+    if not email_norm:
+        return
+    now_iso = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "email": email_norm,
+        "email_lower": email_norm,
+        "active": True,
+        "source": source,
+        "updated_at": now_iso,
+    }
+    if extra:
+        payload.update(extra)
+    await db.licenses.update_one(
+        {"email_lower": email_norm},
+        {"$set": payload, "$setOnInsert": {"created_at": now_iso}},
+        upsert=True,
+    )
+    await db.users.update_many(
+        {"email": {"$regex": f"^{email_norm}$", "$options": "i"}},
+        {"$set": {"license_active": True, "license_source": source, "license_updated_at": now_iso}},
+    )
+
+async def sync_user_license(user_id: str, email: str) -> bool:
+    email_norm = normalize_email(email)
+    if not user_id or not email_norm:
+        return False
+    lic = await db.licenses.find_one({"email_lower": email_norm, "active": True})
+    has_access = bool(lic)
+    update_payload = {
+        "license_active": has_access,
+        "license_source": (lic or {}).get("source", "none"),
+        "license_updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.update_one({"id": user_id}, {"$set": update_payload})
+    return has_access
+
+async def require_active_license_from_token(token: str) -> dict:
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await db.users.find_one({"id": payload.get("user_id")})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    has_access = await sync_user_license(user["id"], user.get("email", ""))
+    if not has_access:
+        raise HTTPException(status_code=402, detail="License required")
+    refreshed = await db.users.find_one({"id": user["id"]})
+    return refreshed or user
+
 # ==================== AUTH ROUTES ====================
 
 @api_router.post("/auth/register")
@@ -362,15 +427,19 @@ async def register(user: UserCreate):
         "language": "es",
         "music_enabled": True,
         "sfx_enabled": True,
+        "license_active": False,
+        "license_source": "none",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "last_online": datetime.now(timezone.utc).isoformat(),
         "is_online": False,
     }
     
     await db.users.insert_one(user_doc)
+    await sync_user_license(user_id, user.email)
+    refreshed = await db.users.find_one({"id": user_id})
     token = create_token({"user_id": user_id, "email": user.email})
     
-    safe_user = {k: v for k, v in user_doc.items() if k not in ["password_hash", "_id"]}
+    safe_user = {k: v for k, v in (refreshed or user_doc).items() if k not in ["password_hash", "_id"]}
     return {"token": token, "user": safe_user}
 
 @api_router.post("/auth/login")
@@ -379,8 +448,10 @@ async def login(user: UserLogin):
     if not db_user or not pwd_context.verify(user.password, db_user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
+    await sync_user_license(db_user["id"], db_user.get("email", ""))
     token = create_token({"user_id": db_user["id"], "email": db_user["email"]})
     await db.users.update_one({"id": db_user["id"]}, {"$set": {"is_online": True, "last_online": datetime.now(timezone.utc).isoformat()}})
+    db_user = await db.users.find_one({"id": db_user["id"]})
     
     safe_user = {k: v for k, v in db_user.items() if k not in ["password_hash", "_id"]}
     if "auth_provider" not in safe_user:
@@ -435,6 +506,7 @@ async def _google_find_or_create_user_async(email: str, name: str, picture: str)
             "best_score": 0, "achievements": [], "friends": [],
             "friend_requests": [], "language": "es",
             "music_enabled": True, "sfx_enabled": True, "music_genre": "electronic",
+            "license_active": False, "license_source": "none",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_online": datetime.now(timezone.utc).isoformat(), "is_online": True,
         }
@@ -445,6 +517,8 @@ async def _google_find_or_create_user_async(email: str, name: str, picture: str)
         # Last-resort guard to prevent OAuth callback 500 on legacy docs.
         user_id = str(uuid.uuid4())
         await db.users.update_one({"email": email}, {"$set": {"id": user_id}})
+    await sync_user_license(user_id, email)
+    user_doc = await db.users.find_one({"id": user_id})
     token = create_token({"user_id": user_id, "email": email})
     safe_user = {k: v for k, v in user_doc.items() if k not in ["password_hash", "_id"]}
     return {"token": token, "user": serialize_doc(safe_user)}
@@ -488,6 +562,7 @@ async def _facebook_find_or_create_user_async(email: str, name: str, picture: st
             "best_score": 0, "achievements": [], "friends": [],
             "friend_requests": [], "language": "es",
             "music_enabled": True, "sfx_enabled": True, "music_genre": "electronic",
+            "license_active": False, "license_source": "none",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_online": datetime.now(timezone.utc).isoformat(), "is_online": True,
         }
@@ -498,6 +573,8 @@ async def _facebook_find_or_create_user_async(email: str, name: str, picture: st
         # Last-resort guard to prevent OAuth callback 500 on legacy docs.
         user_id = str(uuid.uuid4())
         await db.users.update_one({"email": email}, {"$set": {"id": user_id}})
+    await sync_user_license(user_id, email)
+    user_doc = await db.users.find_one({"id": user_id})
     token = create_token({"user_id": user_id, "email": email})
     safe_user = {k: v for k, v in user_doc.items() if k not in ["password_hash", "_id"]}
     return {"token": token, "user": serialize_doc(safe_user)}
@@ -695,6 +772,163 @@ async def get_auth_providers():
     }
 
 
+@api_router.post("/billing/stripe/create-checkout-session")
+async def create_stripe_checkout_session(data: dict):
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe is not configured")
+
+    email = normalize_email(data.get("email", ""))
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required")
+
+    success_url = (data.get("success_url") or f"{MARKETING_SITE_URL}/success").strip()
+    cancel_url = (data.get("cancel_url") or f"{MARKETING_SITE_URL}/pricing").strip()
+    source = (data.get("source") or "landing_web").strip()
+
+    line_item = (
+        [{"price": STRIPE_PRICE_ID, "quantity": 1}]
+        if STRIPE_PRICE_ID
+        else [{
+            "price_data": {
+                "currency": "eur",
+                "unit_amount": STRIPE_PROMO_AMOUNT_EUR_CENTS,
+                "product_data": {"name": "Xamox Flow Web Access"},
+            },
+            "quantity": 1,
+        }]
+    )
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            customer_email=email,
+            line_items=line_item,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            allow_promotion_codes=True,
+            metadata={
+                "email": email,
+                "source": source,
+                "product": "xamox_flow_web_access",
+            },
+            client_reference_id=email,
+        )
+        return {"checkout_url": session.url, "session_id": session.id}
+    except Exception as e:
+        logger.exception("Stripe checkout session creation failed")
+        raise HTTPException(status_code=500, detail=f"Stripe checkout failed: {type(e).__name__}")
+
+
+@api_router.get("/billing/stripe/checkout-start")
+async def stripe_checkout_start(email: str = "", source: str = "landing_web", success_url: str = "", cancel_url: str = ""):
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe is not configured")
+
+    email_norm = normalize_email(email)
+    success = (success_url or f"{MARKETING_SITE_URL}/success").strip()
+    cancel = (cancel_url or f"{MARKETING_SITE_URL}/pricing").strip()
+
+    line_item = (
+        [{"price": STRIPE_PRICE_ID, "quantity": 1}]
+        if STRIPE_PRICE_ID
+        else [{
+            "price_data": {
+                "currency": "eur",
+                "unit_amount": STRIPE_PROMO_AMOUNT_EUR_CENTS,
+                "product_data": {"name": "Xamox Flow Web Access"},
+            },
+            "quantity": 1,
+        }]
+    )
+    kwargs = {
+        "mode": "payment",
+        "line_items": line_item,
+        "success_url": success,
+        "cancel_url": cancel,
+        "allow_promotion_codes": True,
+        "metadata": {
+            "source": source or "landing_web",
+            "product": "xamox_flow_web_access",
+            "email": email_norm,
+        },
+    }
+    if email_norm:
+        kwargs["customer_email"] = email_norm
+        kwargs["client_reference_id"] = email_norm
+    session = stripe.checkout.Session.create(**kwargs)
+    return RedirectResponse(url=session.url)
+
+
+@api_router.post("/billing/stripe/webhook")
+async def stripe_webhook(request: Request):
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe is not configured")
+
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature")
+
+    try:
+        if STRIPE_WEBHOOK_SECRET:
+            event = stripe.Webhook.construct_event(payload, signature, STRIPE_WEBHOOK_SECRET)
+        else:
+            event = json.loads(payload.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid Stripe webhook")
+
+    event_type = event.get("type")
+    event_data = (event.get("data") or {}).get("object") or {}
+
+    if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+        paid_email = normalize_email(
+            ((event_data.get("customer_details") or {}).get("email"))
+            or event_data.get("customer_email")
+            or (event_data.get("metadata") or {}).get("email")
+            or ""
+        )
+        if paid_email:
+            await activate_license_for_email(
+                paid_email,
+                source="stripe_web",
+                extra={
+                    "stripe_session_id": event_data.get("id"),
+                    "stripe_payment_intent": event_data.get("payment_intent"),
+                    "amount_total": event_data.get("amount_total"),
+                    "currency": event_data.get("currency"),
+                    "paid_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
+    return {"received": True}
+
+
+@api_router.get("/billing/license-status")
+async def billing_license_status(token: str = "", email: str = ""):
+    if token:
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        user = await db.users.find_one({"id": payload["user_id"]})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        active = await sync_user_license(user["id"], user.get("email", ""))
+        user = await db.users.find_one({"id": user["id"]}) or user
+        return {
+            "active": active,
+            "source": user.get("license_source", "none"),
+            "email": user.get("email", ""),
+        }
+
+    email_norm = normalize_email(email)
+    if not email_norm:
+        raise HTTPException(status_code=400, detail="token or email is required")
+    lic = await db.licenses.find_one({"email_lower": email_norm, "active": True})
+    return {
+        "active": bool(lic),
+        "source": (lic or {}).get("source", "none"),
+        "email": email_norm,
+    }
+
+
 @api_router.get("/diag/db")
 async def diag_db():
     """Temporary diagnostics endpoint to validate Mongo connectivity in production."""
@@ -745,6 +979,7 @@ async def test_login():
             "auth_provider": "email", "connected_providers": ["email"],
             "friends": [], "friend_requests": [], "language": "es",
             "music_enabled": True, "sfx_enabled": True,
+            "license_active": True, "license_source": "test",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_online": datetime.now(timezone.utc).isoformat(), "is_online": True,
         }
@@ -765,6 +1000,8 @@ async def get_me(token: str = ""):
     user = await db.users.find_one({"id": payload["user_id"]})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    await sync_user_license(user["id"], user.get("email", ""))
+    user = await db.users.find_one({"id": payload["user_id"]}) or user
     
     safe_user = {k: v for k, v in user.items() if k not in ["password_hash", "_id"]}
     if "auth_provider" not in safe_user:
@@ -1548,6 +1785,14 @@ manager = ConnectionManager()
 
 @app.websocket("/api/ws/{room_code}/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, room_code: str, user_id: str):
+    ws_user = await db.users.find_one({"id": user_id})
+    if not ws_user:
+        await websocket.close(code=4404, reason="User not found")
+        return
+    has_license = await sync_user_license(user_id, ws_user.get("email", ""))
+    if not has_license:
+        await websocket.close(code=4403, reason="License required")
+        return
     await websocket.accept()
     await manager.connect(room_code, user_id, websocket)
     
@@ -1959,13 +2204,9 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, user_id: str)
 @api_router.post("/rooms/create")
 async def create_room(data: dict):
     token = data.get("token", "")
-    payload = verify_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    user = await db.users.find_one({"id": payload["user_id"]})
+    user = await require_active_license_from_token(token)
     code = await manager.create_room(
-        payload["user_id"],
+        user["id"],
         user.get("username", "Player"),
         user.get("avatar_color", "#FFD700"),
         user.get("avatar_url", "")
@@ -1974,7 +2215,7 @@ async def create_room(data: dict):
     # Store in DB for persistence
     await db.rooms.update_one({"code": code}, {"$set": {
         "code": code,
-        "host_id": payload["user_id"],
+        "host_id": user["id"],
         "status": "waiting",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }}, upsert=True)
@@ -1985,15 +2226,11 @@ async def create_room(data: dict):
 async def join_room(data: dict):
     token = data.get("token", "")
     code = data.get("code", "").upper()
-    
-    payload = verify_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    user = await db.users.find_one({"id": payload["user_id"]})
+
+    user = await require_active_license_from_token(token)
     success = await manager.join_room(
         code,
-        payload["user_id"],
+        user["id"],
         user.get("username", "Player"),
         user.get("avatar_color", "#FFD700"),
         user.get("avatar_url", "")

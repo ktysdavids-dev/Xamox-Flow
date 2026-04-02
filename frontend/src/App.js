@@ -17,6 +17,7 @@ import MusicPage from "./pages/MusicPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import TermsPage from "./pages/TermsPage";
 import CreditsPage from "./pages/CreditsPage";
+import PaywallPage from "./pages/PaywallPage";
 import { LANG_FLAGS } from "./i18n/translations";
 
 // Error Boundary to catch React errors gracefully
@@ -83,15 +84,27 @@ function GoogleTokenHandler() {
 // Router that detects Google auth callback
 function AppRouter() {
   const location = useLocation();
+  const { loading, isLoggedIn, user } = useAuth();
   const hasToken = new URLSearchParams(location.search).get('token');
   if (hasToken) return <GoogleTokenHandler />;
+
+  const RequireLicense = ({ children }) => {
+    if (loading) return null;
+    if (!isLoggedIn) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;
+    if (!user?.license_active) {
+      return <Navigate to={`/unlock?next=${encodeURIComponent(location.pathname)}`} replace />;
+    }
+    return children;
+  };
+
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/select-profession" element={<ProfessionSelectPage />} />
-      <Route path="/game" element={<GamePage />} />
-      <Route path="/multiplayer" element={<MultiplayerLobby />} />
+      <Route path="/unlock" element={<PaywallPage />} />
+      <Route path="/select-profession" element={<RequireLicense><ProfessionSelectPage /></RequireLicense>} />
+      <Route path="/game" element={<RequireLicense><GamePage /></RequireLicense>} />
+      <Route path="/multiplayer" element={<RequireLicense><MultiplayerLobby /></RequireLicense>} />
       <Route path="/friends" element={<FriendsPage />} />
       <Route path="/leaderboard" element={<LeaderboardPage />} />
       <Route path="/achievements" element={<AchievementsPage />} />
