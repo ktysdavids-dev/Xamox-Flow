@@ -70,6 +70,8 @@ export default function MultiplayerLobby() {
   const [botMessage, setBotMessage] = useState(null);
   const [turnTimer, setTurnTimer] = useState(15);
   const turnTimerRef = useRef(null);
+  const rollAnimTimeoutRef = useRef(null);
+  const DICE_ANIMATION_MS = 1100;
 
   useEffect(() => {
     if (!isLoggedIn) { navigate('/login'); return; }
@@ -80,7 +82,13 @@ export default function MultiplayerLobby() {
     const roomFromFriend = params.get('room');
     if (roomFromFriend) connectToRoom(roomFromFriend);
 
-    return () => { if (wsRef.current) { try { wsRef.current.close(); } catch(e){} } };
+    return () => {
+      if (wsRef.current) { try { wsRef.current.close(); } catch(e){} }
+      if (rollAnimTimeoutRef.current) {
+        clearTimeout(rollAnimTimeoutRef.current);
+        rollAnimTimeoutRef.current = null;
+      }
+    };
   }, [isLoggedIn]); // eslint-disable-line
 
   const loadRooms = async () => {
@@ -146,6 +154,15 @@ export default function MultiplayerLobby() {
       socket.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
+          const getEventTypeFromTile = (tileType) => {
+            if (tileType === 'trivia') return 'trivia';
+            if (tileType === 'investment' || tileType === 'real_estate') return 'investment';
+            if (tileType === 'market') return 'market';
+            if (tileType === 'opportunity') return 'opportunity';
+            if (tileType === 'tax') return 'tax';
+            if (tileType === 'payday') return 'payday_bonus';
+            return 'event';
+          };
           switch (data.type) {
             case 'room_state':
               setCurrentRoom(data.room);
@@ -167,26 +184,30 @@ export default function MultiplayerLobby() {
               if (musicEnabled) { try { playMusic('game'); } catch(e) {} }
               break;
             case 'dice_rolled':
-              setDiceValues(data.dice);
-              setIsRolling(false);
-              setGameState(data.game_state);
-              if (data.passed_payday) playSfx('coin');
-              // Handle tile event - only show modal if there's an event AND it's not a bot roll
-              if (data.tile_event && !data.is_bot_roll) {
-                const tileType = data.tile?.type;
-                let eventType = 'event';
-                if (tileType === 'trivia') eventType = 'trivia';
-                else if (tileType === 'investment' || tileType === 'real_estate') eventType = 'investment';
-                else if (tileType === 'market') eventType = 'market';
-                else if (tileType === 'opportunity') eventType = 'opportunity';
-                else if (tileType === 'tax') eventType = 'tax';
-                else if (tileType === 'payday') eventType = 'payday_bonus';
-                setCurrentEvent({ type: eventType, data: data.tile_event });
-              } else {
-                // No event or bot roll - clear any leftover
-                setCurrentEvent(null);
+              // Keep a visible, synchronized roll animation on all clients.
+              if (rollAnimTimeoutRef.current) {
+                clearTimeout(rollAnimTimeoutRef.current);
+                rollAnimTimeoutRef.current = null;
               }
-              playSfx('dice');
+              setCurrentEvent(null);
+              setIsRolling(true);
+              setDiceValues(data.dice);
+              // Avoid duplicate local SFX, but still play remote throws.
+              if (data.user_id !== user.id) {
+                playSfx('dice');
+              }
+              rollAnimTimeoutRef.current = setTimeout(() => {
+                setIsRolling(false);
+                setGameState(data.game_state);
+                if (data.passed_payday) playSfx('coin');
+                // Show modal only for real player turns (not bot autoplay)
+                if (data.tile_event && !data.is_bot_roll) {
+                  setCurrentEvent({ type: getEventTypeFromTile(data.tile?.type), data: data.tile_event });
+                } else {
+                  setCurrentEvent(null);
+                }
+                rollAnimTimeoutRef.current = null;
+              }, DICE_ANIMATION_MS);
               break;
             case 'turn_resolved':
               setGameState(data.game_state);
@@ -315,6 +336,10 @@ export default function MultiplayerLobby() {
     setForfeitInfo(null);
     setBotMessage(null);
     if (turnTimerRef.current) clearInterval(turnTimerRef.current);
+    if (rollAnimTimeoutRef.current) {
+      clearTimeout(rollAnimTimeoutRef.current);
+      rollAnimTimeoutRef.current = null;
+    }
     loadRooms();
   };
 
@@ -440,6 +465,8 @@ export default function MultiplayerLobby() {
             onRollDice={isMyTurn ? rollDice : undefined}
             phase={isMyTurn ? gameState.phase : 'wait'}
             rollLabel={`🎲 ${t('roll_dice')}`}
+            activePlayerId={gameState.current_turn}
+            selfPlayerId={user.id}
           />
         </div>
 

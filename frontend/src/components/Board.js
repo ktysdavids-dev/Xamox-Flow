@@ -929,6 +929,42 @@ function ProfessionCharacter({ position, walking, professionId = 'engineer', gam
   );
 }
 
+function OpponentPawn({ position, color = '#7aa6ff', active = false }) {
+  const ref = useRef(null);
+  const tRef = useRef(Math.random() * Math.PI * 2);
+
+  useFrame((_, delta) => {
+    if (!ref.current) return;
+    tRef.current += delta * (active ? 2.8 : 1.7);
+    ref.current.position.set(position.x, position.y + Math.sin(tRef.current) * 0.06, position.z);
+  });
+
+  return (
+    <group ref={ref} position={[position.x, position.y, position.z]}>
+      <mesh castShadow>
+        <capsuleGeometry args={[0.18, 0.28, 8, 12]} />
+        <meshPhysicalMaterial
+          color={color}
+          roughness={0.28}
+          metalness={0.55}
+          clearcoat={0.5}
+          clearcoatRoughness={0.1}
+          emissive={active ? color : '#000000'}
+          emissiveIntensity={active ? 0.22 : 0}
+        />
+      </mesh>
+      <mesh position={[0, 0.34, 0]} castShadow>
+        <sphereGeometry args={[0.12, 16, 16]} />
+        <meshStandardMaterial color="#f0d7b6" roughness={0.5} metalness={0.08} />
+      </mesh>
+      <mesh position={[0, -0.18, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.22, 0.32, 24]} />
+        <meshBasicMaterial color={active ? '#f7d77a' : '#66b8ff'} transparent opacity={active ? 0.9 : 0.55} />
+      </mesh>
+    </group>
+  );
+}
+
 /* ═══════════════════════════════════════════
    EFFECTS
    ═══════════════════════════════════════════ */
@@ -976,7 +1012,21 @@ function CinematicCamera() {
    FULL 3D SCENE — warm cinematic lighting
    ═══════════════════════════════════════════ */
 
-function BoardScene({ tiles, animatedPos, impactPulse, playerColor, players, walking, diceValues, rolling, professionId, gameSpeed, drag }) {
+function BoardScene({
+  tiles,
+  animatedPos,
+  impactPulse,
+  playerColor,
+  players,
+  walking,
+  diceValues,
+  rolling,
+  professionId,
+  gameSpeed,
+  drag,
+  activePlayerId,
+  selfPlayerId,
+}) {
   const total = tiles.length || TILE_COUNT_FALLBACK;
   const current = useMemo(() => toXZ(animatedPos, total, BOARD_RADIUS), [animatedPos, total]);
   const playerPoint = useMemo(() => ({ x: current.x, y: BOARD_SURFACE_Y + 0.7, z: current.z }), [current]);
@@ -984,6 +1034,43 @@ function BoardScene({ tiles, animatedPos, impactPulse, playerColor, players, wal
     Math.min(6, Math.max(1, diceValues[0] || 1)),
     Math.min(6, Math.max(1, diceValues[1] || 1)),
   ], [diceValues]);
+  const allPlayers = useMemo(() => {
+    const selfId = selfPlayerId || 'self-player';
+    return [
+      { id: selfId, position: animatedPos, color: playerColor, profession_id: professionId, isSelf: true },
+      ...(players || []).map((p) => ({ ...p, isSelf: false })),
+    ];
+  }, [animatedPos, playerColor, professionId, players, selfPlayerId]);
+  const arrangedPlayers = useMemo(() => {
+    const byTile = new Map();
+    const normalized = allPlayers.map((p) => {
+      const tileIndex = ((p.position ?? 0) % total + total) % total;
+      if (!byTile.has(tileIndex)) byTile.set(tileIndex, []);
+      byTile.get(tileIndex).push(p.id);
+      return { ...p, tileIndex };
+    });
+
+    return normalized.map((p) => {
+      const group = byTile.get(p.tileIndex) || [p.id];
+      const stackIndex = Math.max(0, group.indexOf(p.id));
+      const count = group.length;
+      const angle = count > 1 ? (stackIndex / count) * Math.PI * 2 : 0;
+      const spreadRadius = count > 1 ? 0.42 : 0;
+      const base = toXZ(p.tileIndex, total, BOARD_RADIUS);
+      return {
+        ...p,
+        point: {
+          x: base.x + Math.cos(angle) * spreadRadius,
+          y: BOARD_SURFACE_Y + 0.7,
+          z: base.z + Math.sin(angle) * spreadRadius,
+        },
+      };
+    });
+  }, [allPlayers, total]);
+  const selfRenderPoint = useMemo(() => {
+    const selfId = selfPlayerId || 'self-player';
+    return arrangedPlayers.find((p) => p.id === selfId)?.point || playerPoint;
+  }, [arrangedPlayers, playerPoint, selfPlayerId]);
 
   return (
     <>
@@ -1014,20 +1101,21 @@ function BoardScene({ tiles, animatedPos, impactPulse, playerColor, players, wal
         <Tile3D key={`${tile.type}-${i}`} tile={tile} index={i} total={total} active={i === animatedPos} />
       ))}
 
-      <ProfessionCharacter position={playerPoint} walking={walking} professionId={professionId} gameSpeed={gameSpeed} />
+      <ProfessionCharacter position={selfRenderPoint} walking={walking} professionId={professionId} gameSpeed={gameSpeed} />
 
       <DiePhysics value={safeD[0]} rolling={rolling} xOffset={-3} drag={drag} />
       <DiePhysics value={safeD[1]} rolling={rolling} xOffset={3} drag={drag} />
 
-      {players.slice(0, 5).map((p, idx) => {
-        const pPos = toXZ(p.position ?? 0, total, BOARD_RADIUS);
-        return (
-          <mesh key={p.id || idx} position={[pPos.x, BOARD_SURFACE_Y + 1.1, pPos.z]} castShadow>
-            <sphereGeometry args={[0.3, 18, 18]} />
-            <meshStandardMaterial color={p.color || '#7aa6ff'} metalness={0.4} roughness={0.35} />
-          </mesh>
-        );
-      })}
+      {arrangedPlayers
+        .filter((p) => !p.isSelf)
+        .map((p, idx) => (
+          <OpponentPawn
+            key={p.id || `op-${idx}`}
+            position={p.point}
+            color={p.color || '#7aa6ff'}
+            active={activePlayerId ? p.id === activePlayerId : false}
+          />
+        ))}
 
       <ImpactPulse active={impactPulse} position={new THREE.Vector3(current.x, BOARD_SURFACE_Y + 0.5, current.z)} />
 
@@ -1062,6 +1150,8 @@ export default function Board({
   rollLabel = 'Lanzar Dados',
   professionId = 'engineer',
   gameSpeed = 'medium',
+  activePlayerId = null,
+  selfPlayerId = null,
 }) {
   const [animatedPos, setAnimatedPos] = useState(playerPosition);
   const [impactPulse, setImpactPulse] = useState(false);
@@ -1198,6 +1288,8 @@ export default function Board({
           professionId={professionId}
           gameSpeed={gameSpeed}
           drag={drag}
+          activePlayerId={activePlayerId}
+          selfPlayerId={selfPlayerId}
         />
       </Canvas>
 
