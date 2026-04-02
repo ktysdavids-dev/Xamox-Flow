@@ -10,7 +10,7 @@ import EventModal from '../components/EventModal';
 import SettingsModal from '../components/SettingsModal';
 import axios from 'axios';
 
-import { API, getWebsocketOrigin } from '../config';
+import { API, getWebsocketOrigin, isAndroidAppClient } from '../config';
 const WS_BASE = getWebsocketOrigin();
 
 // Multiplayer translations for all 7 languages
@@ -72,6 +72,7 @@ export default function MultiplayerLobby() {
   const turnTimerRef = useRef(null);
   const rollAnimTimeoutRef = useRef(null);
   const DICE_ANIMATION_MS = 1100;
+  const isAppClient = isAndroidAppClient();
 
   useEffect(() => {
     if (!isLoggedIn) { navigate('/login'); return; }
@@ -111,7 +112,7 @@ export default function MultiplayerLobby() {
 
   const createRoom = async () => {
     try {
-      const r = await axios.post(`${API}/rooms/create`, { token });
+      const r = await axios.post(`${API}/rooms/create`, { token, from_app: isAppClient });
       playSfx('success');
       connectToRoom(r.data.code);
     } catch (e) {
@@ -124,7 +125,7 @@ export default function MultiplayerLobby() {
     const codeToUse = (code || joinCode).toUpperCase().trim();
     if (!codeToUse) return;
     try {
-      await axios.post(`${API}/rooms/join`, { token, code: codeToUse });
+      await axios.post(`${API}/rooms/join`, { token, code: codeToUse, from_app: isAppClient });
       playSfx('success');
       connectToRoom(codeToUse);
     } catch (e) {
@@ -137,7 +138,7 @@ export default function MultiplayerLobby() {
     try {
       if (wsRef.current) { try { wsRef.current.close(); } catch(e){} }
 
-      const wsUrl = `${WS_BASE}/api/ws/${code}/${user.id}`;
+      const wsUrl = `${WS_BASE}/api/ws/${code}/${user.id}${isAppClient ? '?from_app=1' : ''}`;
       const socket = new WebSocket(wsUrl);
 
       socket.onopen = () => {
@@ -288,7 +289,7 @@ export default function MultiplayerLobby() {
     } catch (e) {
       setError(ml('no_connect', lang));
     }
-  }, [user, lang, playSfx]);
+  }, [user, lang, playSfx, isAppClient]);
 
   const sendChat = () => {
     if (!chatInput.trim() || !wsRef.current) return;

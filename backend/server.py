@@ -393,6 +393,31 @@ async def require_active_license_from_token(token: str) -> dict:
     refreshed = await db.users.find_one({"id": user["id"]})
     return refreshed or user
 
+def _is_app_client_hint(from_app: Any = None) -> bool:
+    if isinstance(from_app, bool):
+        return from_app
+    if from_app is None:
+        return False
+    return str(from_app).strip().lower() in {"1", "true", "yes", "y", "app", "android"}
+
+async def require_game_access_from_token(token: str, from_app: Any = None) -> dict:
+    """
+    Access rules:
+    - Web: requires active web license (Stripe/web flow).
+    - Android app/TWA client: allowed without web license (already paid in Play Store).
+    """
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await db.users.find_one({"id": payload.get("user_id")})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    has_access = await sync_user_license(user["id"], user.get("email", ""))
+    if not has_access and not _is_app_client_hint(from_app):
+        raise HTTPException(status_code=402, detail="License required")
+    refreshed = await db.users.find_one({"id": user["id"]})
+    return refreshed or user
+
 # ==================== AUTH ROUTES ====================
 
 @api_router.post("/auth/register")
@@ -1785,13 +1810,13 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 @app.websocket("/api/ws/{room_code}/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, room_code: str, user_id: str):
+async def websocket_endpoint(websocket: WebSocket, room_code: str, user_id: str, from_app: str = "0"):
     ws_user = await db.users.find_one({"id": user_id})
     if not ws_user:
         await websocket.close(code=4404, reason="User not found")
         return
     has_license = await sync_user_license(user_id, ws_user.get("email", ""))
-    if not has_license:
+    if not has_license and not _is_app_client_hint(from_app):
         await websocket.close(code=4403, reason="License required")
         return
     await websocket.accept()
@@ -2205,7 +2230,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, user_id: str)
 @api_router.post("/rooms/create")
 async def create_room(data: dict):
     token = data.get("token", "")
-    user = await require_active_license_from_token(token)
+    user = await require_game_access_from_token(token, data.get("from_app"))
     code = await manager.create_room(
         user["id"],
         user.get("username", "Player"),
@@ -2228,7 +2253,7 @@ async def join_room(data: dict):
     token = data.get("token", "")
     code = data.get("code", "").upper()
 
-    user = await require_active_license_from_token(token)
+    user = await require_game_access_from_token(token, data.get("from_app"))
     success = await manager.join_room(
         code,
         user["id"],

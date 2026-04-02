@@ -83,3 +83,20 @@ export function getWebsocketOrigin() {
   if (!o) return '';
   return o.replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://');
 }
+
+/**
+ * Detecta ejecución desde app Android (TWA/WebView) para no forzar paywall web.
+ */
+export function isAndroidAppClient() {
+  if (typeof window === 'undefined') return false;
+  const ua = (window.navigator?.userAgent || '').toLowerCase();
+  const referrer = (document.referrer || '').toLowerCase();
+  const isAndroid = ua.includes('android');
+  const isWebView = ua.includes(' wv') || ua.includes('; wv') || ua.includes('version/');
+  const fromAndroidAppReferrer = referrer.startsWith('android-app://');
+  const standalone =
+    window.matchMedia?.('(display-mode: standalone)')?.matches ||
+    window.matchMedia?.('(display-mode: fullscreen)')?.matches ||
+    window.navigator?.standalone === true;
+  return isAndroid && (isWebView || fromAndroidAppReferrer || standalone);
+}

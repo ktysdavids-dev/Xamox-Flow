@@ -18,6 +18,7 @@ import PrivacyPage from "./pages/PrivacyPage";
 import TermsPage from "./pages/TermsPage";
 import CreditsPage from "./pages/CreditsPage";
 import PaywallPage from "./pages/PaywallPage";
+import { isAndroidAppClient } from "./config";
 import { LANG_FLAGS } from "./i18n/translations";
 
 // Error Boundary to catch React errors gracefully
@@ -91,6 +92,8 @@ function AppRouter() {
   const RequireLicense = ({ children }) => {
     if (loading) return null;
     if (!isLoggedIn) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;
+    // Compradores de Google Play/App Android no deben ser forzados al paywall web.
+    if (isAndroidAppClient()) return children;
     if (!user?.license_active) {
       return <Navigate to={`/unlock?next=${encodeURIComponent(location.pathname)}`} replace />;
     }
