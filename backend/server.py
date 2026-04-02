@@ -43,6 +43,7 @@ STRIPE_WEBHOOK_SECRET = (os.environ.get("STRIPE_WEBHOOK_SECRET") or "").strip()
 STRIPE_PRICE_ID = (os.environ.get("STRIPE_PRICE_ID") or "").strip()
 STRIPE_PROMO_AMOUNT_EUR_CENTS = int((os.environ.get("STRIPE_PROMO_AMOUNT_EUR_CENTS") or "299").strip() or "299")
 MARKETING_SITE_URL = (os.environ.get("MARKETING_SITE_URL") or "https://www.xamoxflow.com").rstrip("/")
+PLAY_SITE_URL = (os.environ.get("PLAY_SITE_URL") or "https://play.xamoxflow.com").rstrip("/")
 
 if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
@@ -781,8 +782,8 @@ async def create_stripe_checkout_session(data: dict):
     if not email:
         raise HTTPException(status_code=400, detail="email is required")
 
-    success_url = (data.get("success_url") or f"{MARKETING_SITE_URL}/success").strip()
-    cancel_url = (data.get("cancel_url") or f"{MARKETING_SITE_URL}/pricing").strip()
+    success_url = (data.get("success_url") or f"{PLAY_SITE_URL}/unlock?from=stripe").strip()
+    cancel_url = (data.get("cancel_url") or f"{MARKETING_SITE_URL}").strip()
     source = (data.get("source") or "landing_web").strip()
 
     line_item = (
@@ -825,8 +826,8 @@ async def stripe_checkout_start(email: str = "", source: str = "landing_web", su
         raise HTTPException(status_code=503, detail="Stripe is not configured")
 
     email_norm = normalize_email(email)
-    success = (success_url or f"{MARKETING_SITE_URL}/success").strip()
-    cancel = (cancel_url or f"{MARKETING_SITE_URL}/pricing").strip()
+    success = (success_url or f"{PLAY_SITE_URL}/unlock?from=stripe").strip()
+    cancel = (cancel_url or f"{MARKETING_SITE_URL}").strip()
 
     line_item = (
         [{"price": STRIPE_PRICE_ID, "quantity": 1}]
